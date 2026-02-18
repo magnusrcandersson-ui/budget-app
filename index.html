@@ -135,7 +135,7 @@
     .login-logo{text-align:center;font-size:3rem;margin-bottom:10px}
     .login-title{text-align:center;font-size:1.7rem;font-weight:700;background:linear-gradient(135deg,#6366f1,#22c55e);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:6px}
     .login-sub{text-align:center;color:var(--muted);font-size:.85rem;margin-bottom:28px}
-    .login-err{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:10px 14px;color:var(--red);font-size:.84rem;margin-bottom:14px;display:none}
+    .login-err{display:none;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:10px 14px;color:var(--red);font-size:.84rem;margin-bottom:14px;display:none}
     .logout-btn{background:var(--surface2);border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:8px 16px;font-size:.82rem;font-weight:600;cursor:pointer;font-family:inherit;transition:background .15s}
     .logout-btn:hover{background:var(--border);color:var(--text)}
 
@@ -192,42 +192,17 @@
   </style>
 </head>
 <body>
-<!-- LOGIN SCREEN -->
+<!-- LOGIN SCREEN (Netlify Identity) -->
 <div id="loginScreen">
   <div class="login-box">
     <div class="login-logo">💸</div>
-    <div class="login-title">Budget & Portfölj</div>
+    <div class="login-title">Budget &amp; Portfölj</div>
     <p class="login-sub">Logga in för att fortsätta</p>
-    <div class="login-err" id="loginErr">Fel användarnamn eller lösenord</div>
-    <div class="form-row"><label>ANVÄNDARNAMN</label><input type="text" id="loginUser" placeholder="användarnamn" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()"/></div>
-    <div class="form-row" style="margin-bottom:20px"><label>LÖSENORD</label><input type="password" id="loginPass" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"/></div>
-    <button class="btn btn-g" onclick="doLogin()">Logga in →</button>
+    <div class="login-err" id="loginErr">Du behöver vara inloggad för att fortsätta.</div>
+    <button class="btn btn-g" id="netlifyLoginBtn">Logga in →</button>
   </div>
 </div>
-
-<div class="container" id="mainApp" style="display:none">
-  <header style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px">
-    <div>
-      <h1>💸 Budget &amp; Portfölj</h1>
-      <p>Registrera och följ upp dina inkomster, utgifter och investeringar</p>
-    </div>
-    <button class="logout-btn" onclick="doLogout()">Logga ut</button>
-  </header>
-
-  <!-- TABS -->
-  <div class="tabs-wrap">
-    <div class="tabs">
-      <button class="tab active" onclick="switchTab('budget',this)">💰 Budget</button>
-      <button class="tab" onclick="switchTab('invest',this)">📈 Investeringar</button>
-    </div>
-    <div class="invest-badge" id="investBadge" style="display:none">
-      <div class="invest-badge-icon">🏦</div>
-      <div class="invest-badge-content">
-        <div class="invest-badge-label">Investerat</div>
-        <div class="invest-badge-value" id="investBadgeValue">0 kr</div>
-      </div>
-    </div>
-  </div>
+</div>
 
   <!-- ===================== BUDGET TAB ===================== -->
   <div class="tab-section active" id="tab-budget">
@@ -485,36 +460,42 @@ function showToast(msg, type='green') {
   setTimeout(() => t.className = `toast ${type}`, 2800);
 }
 
-// =================== LOGIN ===================
-const CREDENTIALS = { username: 'massemus', password: 'massemus' };
-
-function checkSession() {
-  return sessionStorage.getItem('budget_auth') === 'true';
+// =================== LOGIN (Netlify Identity) ===================
+function showApp(user) {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('mainApp').style.display = 'block';
+  document.getElementById('loginErr').style.display = 'none';
+  // Render after login
+  render(); renderInv(); initChart();
 }
 
-function doLogin() {
-  const user = document.getElementById('loginUser').value.trim();
-  const pass = document.getElementById('loginPass').value;
-  const err  = document.getElementById('loginErr');
-  if (user === CREDENTIALS.username && pass === CREDENTIALS.password) {
-    sessionStorage.setItem('budget_auth', 'true');
-    document.getElementById('loginScreen').style.display = 'none';
-    document.getElementById('mainApp').style.display = 'block';
-    err.style.display = 'none';
-    render(); renderInv(); initChart();
-  } else {
-    err.style.display = 'block';
-    document.getElementById('loginPass').value = '';
-  }
-}
-
-function doLogout() {
-  sessionStorage.removeItem('budget_auth');
-  document.getElementById('loginScreen').style.display = 'flex';
+function showLogin() {
   document.getElementById('mainApp').style.display = 'none';
-  document.getElementById('loginUser').value = '';
-  document.getElementById('loginPass').value = '';
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('loginErr').style.display = 'block';
 }
+
+// Wire up Netlify Identity (invite-only handled in Netlify UI)
+window.addEventListener('load', () => {
+  const btn = document.getElementById('netlifyLoginBtn');
+  if (!window.netlifyIdentity) {
+    showLogin();
+    return;
+  }
+  btn?.addEventListener('click', () => window.netlifyIdentity.open());
+  window.netlifyIdentity.on('init', user => {
+    if (user) showApp(user);
+    else showLogin();
+  });
+  window.netlifyIdentity.on('login', user => {
+    showApp(user);
+    window.netlifyIdentity.close();
+  });
+  window.netlifyIdentity.on('logout', () => {
+    showLogin();
+  });
+  window.netlifyIdentity.init();
+});
 
 // =================== TAB SWITCHING ===================
 function switchTab(name, btn) {
@@ -1003,12 +984,10 @@ function initChart() {
 window.addEventListener('resize', drawChart);
 
 // =================== BOOT ===================
-if (checkSession()) {
-  document.getElementById('loginScreen').style.display = 'none';
-  document.getElementById('mainApp').style.display = 'block';
-  render(); renderInv(); initChart();
-}
+// (handled by Netlify Identity init)
 
 </script>
+
+<script src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
 </body>
 </html>
