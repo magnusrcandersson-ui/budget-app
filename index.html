@@ -46,18 +46,711 @@
     .columns{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:28px}
     @media(max-width:720px){.columns{grid-template-columns:1fr}}
     .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
-    .panel-header{display:flex;align-items:center;padding:18px 20px 14px;border-bottom:1px solid var(--border);font-size:.94rem;font-weight:600;gap:8px}
-    .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
-    .dot-g{background:var(--green)}.dot-r{background:var(--red)}.dot-b{background:var(--blue)}
-    .form-body{padding:18px 20px}
-    .form-row{display:flex;flex-direction:column;gap:5px;margin-bottom:13px}
-    .form-row label{font-size:.7rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.7px}
-    input,select{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 13px;color:var(--text);font-family:inherit;font-size:.88rem;width:100%;outline:none;transition:border-color .2s,box-shadow .2s;-webkit-appearance:none}
-    input:focus,select:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(99,102,241,.15)}
-    select option{background:#22263a}
-    input.error{border-color:var(--red)!important;animation:shake .3s ease}
-    @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
-    .btn{width:100%;padding:12px;border:none;border-radius:9px;font-family:inherit;font-size:.9rem;font-weight:600;cursor:pointer;transition:opacity .15s,transform .12s;margin-top:4px;letter-spacing:.2px}
+    .panel-header{display:flex;align-items:center;padding:18px 20px 14px;border-bottom:1px solid var(--border);font-size:.94r<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// =================== SUPABASE SETUP ===================
+// Fyll i från Supabase -> Project Settings -> API
+const SUPABASE_URL = "https://ivkpxyylajewvbvwebvu.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_15LBNxbc-LWTHqLG3QTZhQ_nWmBG3HK";
+
+// 1 användare (email används för riktig auth, användarnamn är bara UI-kontroll)
+const LOGIN_EMAIL = "magnusrcandersson@icloud.com";
+const DISPLAY_USERNAME = "massemus";
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// =================== GLOBALS ===================
+const MONTHS = ['Jan','Feb','Mar','Apr','Maj','Jun','Jul','Aug','Sep','Okt','Nov','Dec'];
+let chartYear = new Date().getFullYear();
+let chartData = {};
+async function saveChartData() {
+  const { data: u } = await sb.auth.getUser();
+  const user_id = u.user?.id;
+  if (!user_id) return;
+  const yearStr = String(chartYear);
+  const arr = chartData[yearStr] || [];
+  for (let i = 0; i < 12; i++) {
+    const v = arr[i]?.val;
+    const month = i + 1;
+    if (v === '' || v === null || v === undefined) {
+      await sb.from('portfolio_month_values').delete().match({ user_id, year: Number(yearStr), month });
+    } else {
+      const num = Number(v);
+      if (!Number.isFinite(num) || num < 0) continue;
+      await sb.from('portfolio_month_values').upsert({ user_id, year: Number(yearStr), month, val: num });
+    }
+  }
+}
+
+const CC={
+  'Lön':'#6366f1','Frilans':'#8b5cf6','Investering':'#06b6d4',
+  'Bidrag / Ersättning':'#f59e0b','Ränta / Utdelning':'#10b981',
+  'Boende':'#ef4444','Mat & Dryck':'#f97316','Transport':'#eab308',
+  'Nöje & Fritid':'#ec4899','Hälsa & Vård':'#22c55e','Kläder':'#a78bfa',
+  'Teknik & Prenumerationer':'#38bdf8','Sparande':'#14b8a6','Övrigt':'#94a3b8'
+};
+const SCOLORS = {
+  'Teknik':'#6366f1','Finans':'#06b6d4','Hälsa':'#22c55e','Industri':'#f97316',
+  'Konsument':'#ec4899','Energi':'#eab308','Fastigheter':'#ef4444',
+  'Fond / ETF':'#8b5cf6','Krypto':'#f59e0b','Övrigt':'#94a3b8'
+};
+
+let data    = [];
+let invData = [];
+const now   = () => new Date().toISOString().slice(0, 10);
+const fmt   = n => (n||0).toLocaleString('sv-SE', {minimumFractionDigits:0}) + ' kr';
+const esc   = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const fmtD  = d => { if(!d) return '–'; const [y,m,day]=d.split('-'); return `${day}/${m}/${y}`; };
+const save = () => {}; // legacy no-op (Supabase används)
+const saveInv = () => {}; // legacy no-op (Supabase används)
+async function loadAll() {
+  // Budget
+  {
+    const { data: tx, error } = await sb
+      .from("transactions")
+      .select("id,type,cat,desc,amt,date")
+      .order("date", { ascending: false });
+    if (error) throw error;
+    data = (tx || []).map(t => ({
+      id: t.id,
+      type: t.type,
+      cat: t.cat,
+      desc: t.desc,
+      amt: Number(t.amt),
+      date: String(t.date)
+    }));
+  }
+
+  // Investeringar
+  {
+    const { data: inv, error } = await sb
+      .from("invest_purchases")
+      .select("id,name,cost,val,date")
+      .order("date", { ascending: false });
+    if (error) throw error;
+    invData = (inv || []).map(p => ({
+      id: p.id,
+      name: p.name,
+      cost: Number(p.cost),
+      val: Number(p.val),
+      date: String(p.date)
+    }));
+  }
+
+  // Månadsvärden för graf
+  {
+    const { data: mv, error } = await sb
+      .from("portfolio_month_values")
+      .select("year,month,val");
+    if (error) throw error;
+
+    chartData = {};
+    (mv || []).forEach(r => {
+      const yk = String(r.year);
+      if (!chartData[yk]) chartData[yk] = Array(12).fill(null).map(() => ({ val: '' }));
+      chartData[yk][r.month - 1].val = Number(r.val);
+    });
+  }
+}
+
+const fmtNum  = n => (n||0).toLocaleString('sv-SE', {minimumFractionDigits:0, maximumFractionDigits:4});
+
+// =================== TOAST ===================
+function showToast(msg, type='green') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast ${type} show`;
+  setTimeout(() => t.className = `toast ${type}`, 2800);
+}
+
+// =================== LOGIN ===================
+async function checkSession() {
+  const { data } = await sb.auth.getSession();
+  return !!data.session;
+}
+
+async function doLogin() {
+  const user = document.getElementById('loginUser').value.trim();
+  const pass = document.getElementById('loginPass').value;
+  const err  = document.getElementById('loginErr');
+
+  // Behåll "ANVÄNDARNAMN" i UI (kontroll), men logga in med fasta emailen i Supabase
+  if (user.toLowerCase() !== DISPLAY_USERNAME.toLowerCase()) {
+    err.textContent = 'Fel användarnamn.';
+    err.style.display = 'block';
+    document.getElementById('loginPass').value = '';
+    return;
+  }
+
+  const { error } = await sb.auth.signInWithPassword({ email: LOGIN_EMAIL, password: pass });
+  if (error) {
+    err.textContent = 'Fel lösenord.';
+    err.style.display = 'block';
+    document.getElementById('loginPass').value = '';
+    return;
+  }
+
+  err.style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('mainApp').style.display = 'block';
+
+  try {
+    await loadAll();
+  } catch (e) {
+    alert(e.message || 'Kunde inte läsa data från Supabase.');
+  }
+
+  render(); renderInv(); initChart();
+}
+
+async function doLogout() {
+  await sb.auth.signOut();
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('mainApp').style.display = 'none';
+  document.getElementById('loginUser').value = '';
+  document.getElementById('loginPass').value = '';
+  document.getElementById('loginErr').style.display = 'none';
+}
+
+// =================== TAB SWITCHING ===================
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  btn.classList.add('active');
+  const badge = document.getElementById('investBadge');
+  if (name === 'invest') {
+    badge.style.display = 'flex';
+    setTimeout(drawChart, 50);
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+// =================== BUDGET ===================
+document.getElementById('iDate').value = now();
+document.getElementById('eDate').value = now();
+
+async function add(type) {
+  const p = type === 'income' ? 'i' : 'e';
+  const descEl = document.getElementById(p+'Desc');
+  const amtEl  = document.getElementById(p+'Amt');
+  const dateEl = document.getElementById(p+'Date');
+  const desc   = descEl.value.trim();
+  const amt    = parseFloat(amtEl.value);
+  const cat    = document.getElementById(p+'Cat').value;
+  const date   = dateEl.value;
+  let ok = true;
+  if (!desc)          { descEl.classList.add('error'); setTimeout(()=>descEl.classList.remove('error'),400); ok=false; }
+  if (!amt || amt<=0) { amtEl.classList.add('error');  setTimeout(()=>amtEl.classList.remove('error'),400);  ok=false; }
+  if (!date)          { dateEl.classList.add('error'); setTimeout(()=>dateEl.classList.remove('error'),400); ok=false; }
+  if (!ok) return;
+
+  const { data: u } = await sb.auth.getUser();
+  const user_id = u.user?.id;
+  if (!user_id) return alert('Inte inloggad.');
+
+  const { data: ins, error } = await sb
+    .from('transactions')
+    .insert([{ user_id, type, desc, amt, cat, date }])
+    .select('id')
+    .single();
+
+  if (error) return alert(error.message);
+
+  data.unshift({ id: ins.id, type, desc, amt, cat, date });
+  render();
+
+  descEl.value = ''; amtEl.value = '';
+  dateEl.value = now();
+  showToast(type==='income' ? '✓ Inkomst tillagd' : '✓ Utgift tillagd', type==='income'?'green':'red');
+}
+
+async function del(id) {
+  const { error } = await sb.from('transactions').delete().eq('id', id);
+  if (error) return alert(error.message);
+  data = data.filter(t => t.id !== id);
+  render();
+  showToast('Transaktion borttagen', 'red');
+}
+
+function clearFilter() {
+  document.getElementById('mFilter').value = '';
+  render();
+}
+
+function render() {
+  const m   = document.getElementById('mFilter').value;
+  const vis = m ? data.filter(t => t.date.startsWith(m)) : data;
+  const inc = vis.filter(t => t.type === 'income');
+  const exp = vis.filter(t => t.type === 'expense');
+  const tI  = inc.reduce((s,t) => s+t.amt, 0);
+  const tE  = exp.reduce((s,t) => s+t.amt, 0);
+  const b   = tI - tE;
+  const p   = tI > 0 ? Math.min(tE/tI*100, 100) : (tE > 0 ? 100 : 0);
+
+  document.getElementById('totIn').textContent = fmt(tI);
+  document.getElementById('totEx').textContent = fmt(tE);
+  document.getElementById('cntIn').textContent = inc.length + (inc.length===1?' post':' poster');
+  document.getElementById('cntEx').textContent = exp.length + (exp.length===1?' post':' poster');
+
+  const bEl = document.getElementById('bal');
+  bEl.textContent = (b < 0 ? '−' : '') + fmt(Math.abs(b));
+  bEl.className = 'card-value' + (b < 0 ? ' neg' : '');
+  document.getElementById('balNote').textContent = b >= 0 ? '✓ Positivt saldo' : '⚠ Underskott';
+
+  const bar = document.getElementById('bar');
+  bar.style.width = p + '%';
+  bar.className = 'prog-fill' + (p > 85 ? ' danger' : p > 65 ? ' warn' : '');
+  document.getElementById('pct').textContent = Math.round(p) + '%';
+
+  const tb = document.getElementById('tBody');
+  const em = document.getElementById('emptyMsg');
+  if (!vis.length) {
+    tb.innerHTML = ''; em.style.display = 'block';
+  } else {
+    em.style.display = 'none';
+    tb.innerHTML = [...vis]
+      .sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id)
+      .map(t => `<tr>
+        <td>${esc(t.desc)}</td>
+        <td><span class="badge badge-${t.type}">${esc(t.cat)}</span></td>
+        <td style="white-space:nowrap">${fmtD(t.date)}</td>
+        <td style="color:var(--dim);font-size:.8rem">${t.type==='income'?'Inkomst':'Utgift'}</td>
+        <td class="amt-${t.type[0]}" style="text-align:right;white-space:nowrap">${t.type==='income'?'+':'−'}${fmt(t.amt)}</td>
+        <td><button class="del" onclick="del(${t.id})" title="Ta bort">✕</button></td>
+      </tr>`).join('');
+  }
+
+  const cm = {};
+  exp.forEach(t => { cm[t.cat] = (cm[t.cat]||0) + t.amt; });
+  const cats = Object.entries(cm).sort((a,b) => b[1]-a[1]);
+  const mx = cats[0]?.[1] || 1;
+  document.getElementById('catArea').innerHTML = cats.length
+    ? cats.map(([c,a]) => `<div class="cat-row">
+        <div class="cat-name" title="${esc(c)}">${esc(c)}</div>
+        <div class="cat-bg"><div class="cat-fill" style="width:${(a/mx*100).toFixed(1)}%;background:${CC[c]||'#94a3b8'}"></div></div>
+        <div class="cat-amt" style="color:${CC[c]||'#94a3b8'}">${fmt(a)}</div>
+      </div>`).join('')
+    : '<p style="color:var(--dim);font-size:.82rem">Inga utgifter att visa för vald period.</p>';
+}
+
+// =================== INVESTMENTS ===================
+document.getElementById('invDate').value = now();
+
+function getHoldings() {
+  const map = {};
+  invData.forEach(p => {
+    const key = p.name.toLowerCase();
+    if (!map[key]) map[key] = { name:p.name, cost:0, val:0 };    map[key].cost   += p.cost;
+    map[key].val    += p.val;
+  });
+  return Object.values(map);
+}
+
+async function addInv() {
+  const nameEl   = document.getElementById('invName');  const costEl   = document.getElementById('invCost');
+  const valEl    = document.getElementById('invVal');
+  const dateEl   = document.getElementById('invDate');
+  const name     = nameEl.value.trim();  const cost     = parseFloat(costEl.value);
+  const val      = parseFloat(valEl.value);
+  const date     = dateEl.value;
+  let ok = true;
+  if (!name)               { nameEl.classList.add('error');  setTimeout(()=>nameEl.classList.remove('error'),400);  ok=false; }
+  if (isNaN(cost)||cost<0) { costEl.classList.add('error');  setTimeout(()=>costEl.classList.remove('error'),400);  ok=false; }
+  if (isNaN(val)||val<0)   { valEl.classList.add('error');   setTimeout(()=>valEl.classList.remove('error'),400);   ok=false; }
+  if (!date)               { dateEl.classList.add('error');  setTimeout(()=>dateEl.classList.remove('error'),400);  ok=false; }
+  if (!ok) return;
+  const { data: u } = await sb.auth.getUser();
+const user_id = u.user?.id;
+if (!user_id) return alert('Inte inloggad.');
+
+const { data: ins, error } = await sb
+  .from('invest_purchases')
+  .insert([{ user_id, name, cost, val, date }])
+  .select('id')
+  .single();
+if (error) return alert(error.message);
+
+invData.push({ id: ins.id, name, cost, val, date });
+
+  // Tolka inmatat "Dagens värde" som TOTALT värde för innehavet (inte per köp).
+  // Om det finns flera köp på samma namn fördelas totalvärdet proportionellt efter investerat belopp.
+  const nameLower = String(name).toLowerCase();
+  const purchases = invData.filter(p => String(p.name).toLowerCase() === nameLower);
+  if (purchases.length > 1) {
+    const totalCost = purchases.reduce((sum, p) => sum + (p.cost || 0), 0);
+    purchases.forEach(p => {
+      if (totalCost > 0) p.val = (p.cost / totalCost) * val;
+      else p.val = val / purchases.length;
+    });
+  }
+
+  showToast('✓ Köp registrerat', 'green');
+// Spara (om vi fördelade om val över flera köp)
+try {
+  const nameLower2 = String(name).toLowerCase();
+  const affected = invData.filter(p => String(p.name).toLowerCase() === nameLower2);
+  for (const p of affected) {
+    await sb.from('invest_purchases').update({ val: p.val }).eq('id', p.id);
+  }
+} catch (e) {
+  console.warn('Kunde inte uppdatera investeringsvärden', e);
+}
+
+saveInv(); renderInv();
+
+  nameEl.value='';
+  costEl.value='';
+  valEl.value='';
+  dateEl.value = now();
+}
+
+async function delInv(id) {
+  const { error } = await sb.from('invest_purchases').delete().eq('id', id);
+  if (error) return alert(error.message);
+  invData = invData.filter(p => p.id !== id);
+  saveInv(); renderInv();
+  showToast('Investering borttagen', 'red');
+}
+
+function delHolding(name) {
+  const nameLower = name.toLowerCase();
+  invData = invData.filter(i => i.name.toLowerCase() !== nameLower);
+  saveInv(); renderInv();
+  showToast('Alla köp av ' + name + ' borttagna', 'red');
+}
+
+function delHoldingBtn(btn) {
+  delHolding(btn.dataset.name);
+}
+
+function toggleEdit(name) {
+  const raw = prompt('Ange nytt dagsvärde (kr) för ' + name + ':');
+  if (raw === null) return;
+  const val = parseFloat(String(raw).replace(',', '.'));
+  if (isNaN(val) || val < 0) { showToast('Ogiltigt värde', 'red'); return; }
+
+  const nameLower = String(name).toLowerCase();
+  const purchases = invData.filter(p => String(p.name).toLowerCase() === nameLower);
+  if (!purchases.length) return;
+
+  const totalCost = purchases.reduce((sum, p) => sum + (p.cost || 0), 0);
+  purchases.forEach(p => {
+    if (totalCost > 0) p.val = (p.cost / totalCost) * val;
+    else p.val = val / purchases.length;
+  });
+
+  saveInv(); renderInv();
+  showToast(name + ' uppdaterat', 'green');
+}
+
+
+function drawChart() {
+  const svg = document.getElementById('chartSvg');
+  if (!svg) return;
+  const W = Math.max(svg.getBoundingClientRect().width || 700, 480);
+  const H = 260;
+  const PAD = { top: 24, right: 20, bottom: 42, left: 72 };
+  const cW = W - PAD.left - PAD.right;
+  const cH = H - PAD.top - PAD.bottom;
+  const months  = getMonthData(chartYear);
+  const holdings = getHoldings();
+  const totVal  = holdings.reduce((s,h) => s + h.val, 0);   // live portfolio value
+
+  const totalCost = invData.reduce((s,i) => s + i.cost, 0);  // total invested
+
+  const pts = months.map((m, idx) => {
+    const ym    = `${chartYear}-${String(idx+1).padStart(2,'0')}`;
+    const nowYM = new Date().toISOString().slice(0,7);
+
+    // Green line = portfolio market value (manual > live totVal for current month)
+    let val = null;
+    if (m.val !== '') {
+      val = parseFloat(m.val);
+    } else if (ym === nowYM && totVal > 0) {
+      val = totVal;
+    }
+
+    // Blue dashed line = cumulative invested amount up to this month
+    const cumInvested = invData
+      .filter(p => p.date && p.date.slice(0,7) <= ym)
+      .reduce((s,p) => s + p.cost, 0) || totalCost;
+
+    return { i: idx, val, cost: cumInvested, invested: totalCost };
+  });
+
+  const GOAL    = 1000000;
+  const valPts  = pts.filter(p => p.val !== null);
+  const maxCost = Math.max(...pts.map(p => p.cost), 0);
+  const allNums = [0, maxCost, GOAL, ...valPts.map(p => p.val)];
+  const maxV = Math.max(...allNums) * 1.08 || 1000;
+  const minV = Math.min(0, ...allNums);
+  const range = maxV - minV || 1;
+  const xP = i => PAD.left + (i / 11) * cW;
+  const yP = v => PAD.top + cH - ((v - minV) / range) * cH;
+
+  let g = '';
+  [0, 0.25, 0.5, 0.75, 1].forEach(t => {
+    const v   = minV + range * t;
+    const y   = yP(v);
+    const lbl = v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? Math.round(v/1e3)+'k' : Math.round(v)+'';
+    g += `<line x1="${PAD.left}" y1="${y}" x2="${W-PAD.right}" y2="${y}" stroke="#2e3347" stroke-width="1" stroke-dasharray="4,3"/>`;
+    g += `<text x="${PAD.left-8}" y="${y+4}" text-anchor="end" fill="#64748b" font-size="11" font-family="Inter,Arial">${lbl}</text>`;
+  });
+
+  // Cost line: step through each month's cumulative invested amount
+  const costLinePts = pts.map(p => `${xP(p.i)},${yP(p.cost)}`).join(' L ');
+  const costLine = `<path d="M ${costLinePts}" stroke="#6366f1" stroke-width="2" stroke-dasharray="7,4" fill="none" opacity="0.8"/>`;
+
+  // Goal line at 1 000 000 kr
+  const goalY    = yP(GOAL);
+  const goalPct  = totVal > 0 ? Math.min(totVal / GOAL * 100, 100) : 0;
+  const goalDone = totVal >= GOAL;
+  const goalCol  = goalDone ? '#22c55e' : '#f59e0b';
+  const goalLine = `
+    <line x1="${PAD.left}" y1="${goalY}" x2="${W - PAD.right}" y2="${goalY}"
+      stroke="${goalCol}" stroke-width="1.5" stroke-dasharray="10,5" opacity="0.9"/>
+    <rect x="${W - PAD.right - 98}" y="${goalY - 11}" width="96" height="20" rx="6"
+      fill="${goalCol}" opacity="0.15"/>
+    <text x="${W - PAD.right - 50}" y="${goalY + 5}" text-anchor="middle"
+      fill="${goalCol}" font-size="11" font-weight="600" font-family="Inter,Arial">
+      🎯 ${goalDone ? '✓ Mål nått!' : goalPct.toFixed(1) + '% av 1M'}
+    </text>`;
+
+  let area = '', line = '';
+  if (valPts.length >= 2) {
+    const coords = valPts.map(p => `${xP(p.i)},${yP(p.val)}`).join(' L ');
+    area = `<path d="M ${xP(valPts[0].i)},${yP(minV)} L ${coords} L ${xP(valPts[valPts.length-1].i)},${yP(minV)} Z" fill="url(#vg)"/>`;
+    line = `<path d="M ${coords}" stroke="#22c55e" stroke-width="2.5" fill="none" stroke-linejoin="round" stroke-linecap="round"/>`;
+  } else if (valPts.length === 1) {
+    line = `<circle cx="${xP(valPts[0].i)}" cy="${yP(valPts[0].val)}" r="4" fill="#22c55e"/>`;
+  }
+
+  // Vertical glow bars instead of dots — one per data point
+  const barW = Math.max(cW / 14, 8);
+  const dots = valPts.map(p => {
+    const pos = (p.val - p.invested) >= 0;
+    const col = pos ? '#22c55e' : '#ef4444';
+    const barTop = yP(p.val);
+    const barH   = Math.max((PAD.top + cH) - barTop, 2);
+    const gradId = `bg${p.i}`;
+    return `
+      <defs>
+        <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${col}" stop-opacity="0.55"/>
+          <stop offset="100%" stop-color="${col}" stop-opacity="0.03"/>
+        </linearGradient>
+      </defs>
+      <rect x="${xP(p.i) - barW/2}" y="${barTop}" width="${barW}" height="${barH}"
+        rx="4" fill="url(#${gradId})"
+        style="cursor:pointer;transition:opacity .15s"
+        onmouseenter="this.style.opacity='.75';showTT(event,${p.i},${p.val},${p.invested})"
+        onmouseleave="this.style.opacity='1';hideTT()"/>
+      <circle cx="${xP(p.i)}" cy="${barTop}" r="3.5"
+        fill="${col}" stroke="#1a1d27" stroke-width="2" pointer-events="none"/>`;
+  }).join('');
+
+  const hits = pts.map(p => p.val !== null ? '' : '').join('');
+
+  const xlbls = MONTHS.map((m,i) =>
+    `<text x="${xP(i)}" y="${H-6}" text-anchor="middle" fill="#64748b" font-size="11" font-family="Inter,Arial">${m}</text>`
+  ).join('');
+
+  const empty = valPts.length === 0
+    ? `<text x="${W/2}" y="${H/2}" text-anchor="middle" fill="#475569" font-size="13" font-family="Inter,Arial">Ange värden nedan eller lägg till köp med datum</text>`
+    : '';
+
+  svg.setAttribute('height', H);
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="vg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#22c55e" stop-opacity="0.12"/>
+        <stop offset="100%" stop-color="#22c55e" stop-opacity="0.01"/>
+      </linearGradient>
+    </defs>
+    ${g}${goalLine}${costLine}${area}${line}${dots}${xlbls}${empty}`;
+}
+function renderInv() {
+  const holdings = getHoldings();
+  const totCost  = holdings.reduce((s,h) => s+h.cost, 0);
+  const totVal   = holdings.reduce((s,h) => s+h.val,  0);
+  const gainKr   = totVal - totCost;
+  const gainPct  = totCost > 0 ? (gainKr/totCost*100) : 0;
+  const isPos    = gainKr >= 0;
+
+  document.getElementById('invTotVal').textContent  = fmt(totVal);
+  document.getElementById('invValNote').textContent = totCost > 0 ? (isPos ? '↑ Värdeökning' : '↓ Värdeminskning') : '–';
+  document.getElementById('investBadgeValue').textContent = fmt(totCost);
+
+  const gkEl = document.getElementById('invTotGainKr');
+  const gpEl = document.getElementById('invTotGainPct');
+  gkEl.textContent = (isPos?'+':'−') + fmt(Math.abs(gainKr));
+  gpEl.textContent = (isPos?'+':'') + gainPct.toFixed(2) + '%';
+  gkEl.className   = 'card-value ' + (isPos?'pos':'neg2');
+  gpEl.className   = 'card-value ' + (isPos?'pos':'neg2');
+  document.getElementById('invGainCard').querySelector('.card-label').style.color = isPos?'var(--green)':'var(--red)';
+  document.getElementById('invPctCard').querySelector('.card-label').style.color  = isPos?'var(--green)':'var(--red)';
+
+  const tbody = document.getElementById('invBody');
+  const empty = document.getElementById('invEmpty');
+  if (!invData.length) { tbody.innerHTML=''; empty.style.display='block'; drawChart(); return; }
+  empty.style.display = 'none';
+
+  const sorted = holdings.sort((a,b) => {
+    const gainA = a.val - a.cost;
+    const gainB = b.val - b.cost;
+    return gainB - gainA;
+  });
+  tbody.innerHTML = sorted.map(h => {
+    const gKr  = h.val - h.cost;
+    const gPct = h.cost > 0 ? (gKr/h.cost*100) : 0;
+    const pos  = gKr >= 0; const zero = gKr === 0;
+    const pctCls = zero?'zero':pos?'pos':'neg';
+    const amtCls = zero?'neutral':pos?'pos':'neg2';
+    const arrow  = zero?'→':pos?'▲':'▼';
+    // Find earliest purchase date for this holding
+    const purchases = invData.filter(p => p.name.toLowerCase() === h.name.toLowerCase());
+    const earliestDate = purchases.reduce((min, p) => !min || p.date < min ? p.date : min, '');
+    return `<tr>
+      <td class="name">${esc(h.name)}</td>
+      <td class="num" style="color:var(--muted)">${fmt(h.cost)}</td>
+<td class="num ${amtCls}">${arrow} ${fmt(Math.abs(gKr))} <span style="opacity:0.7;font-size:0.9em">(${pos?'+':''}${gPct.toFixed(1)}%)</span></td>
+      <td>
+        <button class="del" onclick="toggleEdit('${esc(h.name)}')" title="Redigera värde" style="color:var(--blue);margin-right:4px">✎</button>
+        <button class="del" data-name="${esc(h.name)}" onclick="delHoldingBtn(this)" title="Ta bort alla köp">✕</button>
+      </td>
+    </tr>`;
+  }).join('');
+  drawChart();
+}
+
+// =================== CHART ===================
+function getAutoVal(year, monthIdx) {
+  const ym = `${year}-${String(monthIdx+1).padStart(2,'0')}`;
+  const purchases = invData.filter(p => p.date && p.date.slice(0,7) <= ym);
+  if (!purchases.length) return null;
+  return purchases.reduce((s,p) => s + p.cost, 0);
+}
+
+function getMonthData(year) {
+  const yk = String(year);
+  if (!chartData[yk]) chartData[yk] = Array(12).fill(null).map(() => ({ val: '' }));
+  return chartData[yk];
+}
+
+function changeChartYear(delta) {
+  chartYear += delta;
+  document.getElementById('chartYearLabel').textContent = chartYear;
+  buildMonthInputs();
+  drawChart();
+}
+
+function buildMonthInputs() {
+  const grid = document.getElementById('monthInputGrid');
+  if (!grid) return;
+  const months  = getMonthData(chartYear);
+  const holdings = getHoldings();
+  const totVal  = holdings.reduce((s,h) => s + h.val, 0);
+  const nowYM   = new Date().toISOString().slice(0,7);
+
+  grid.innerHTML = MONTHS.map((m, i) => {
+    const ym        = `${chartYear}-${String(i+1).padStart(2,'0')}`;
+    const autoV     = getAutoVal(chartYear, i);
+    const isNowMon  = ym === nowYM;
+    const hasManual = months[i].val !== '';
+    // Current month: auto-fill with live totVal unless user has overridden
+    const isLive    = isNowMon && totVal > 0 && !hasManual;
+    const rawVal    = hasManual ? months[i].val : (isLive ? Math.round(totVal) : '');
+    const displayVal = rawVal ? Math.round(rawVal).toLocaleString('sv-SE') : '';
+
+    // Hide future months
+    const isFuture = ym > nowYM;
+    if (isFuture) return '';
+
+    let ph, badge;
+    if (hasManual) {
+      badge = '';
+      ph = '';
+    } else if (isLive) {
+      badge = '<span style="color:#22c55e;font-size:.65rem">LIVE</span>';
+      ph = '';
+    } else if (autoV !== null) {
+      badge = '<span style="color:#6366f1;font-size:.65rem">AUTO</span>';
+      ph = `Köpt: ${Math.round(autoV).toLocaleString('sv-SE')} kr`;
+    } else {
+      badge = '';
+      ph = '0 kr';
+    }
+
+    const borderStyle = isLive
+      ? 'border-color:#22c55e80'
+      : (!hasManual && autoV !== null ? 'border-color:#6366f150' : '');
+
+    return `<div class="month-cell" style="${borderStyle}">
+      <div class="month-cell-label" style="display:flex;justify-content:space-between">
+        <span>${m}</span>${badge}
+      </div>
+      <input type="text" inputmode="numeric" pattern="[0-9 ]*"
+        value="${displayVal}"
+        placeholder="${ph}"
+        oninput="updateMonthVal(${i}, this.value.replace(/\\s/g,''))"
+        onfocus="this.select()"/>
+    </div>`;
+  }).join('');
+}
+
+function updateMonthVal(idx, value) {
+  const yk = String(chartYear);
+  if (!chartData[yk]) chartData[yk] = Array(12).fill(null).map(() => ({ val: '' }));
+  chartData[yk][idx].val = value === '' ? '' : parseFloat(value) || 0;
+  saveChartData();
+  buildMonthInputs();
+  drawChart();
+}
+
+
+function showTT(e, i, val, cost) {
+  const tt   = document.getElementById('chartTooltip');
+  const gain = val - cost;
+  const pct  = cost > 0 ? (gain/cost*100) : 0;
+  const pos  = gain >= 0;
+  document.getElementById('ttMonth').textContent = MONTHS[i] + ' ' + chartYear;
+  document.getElementById('ttCost').textContent  = fmt(cost);
+  document.getElementById('ttVal').textContent   = fmt(val);
+  const ge = document.getElementById('ttGain');
+  ge.textContent = (pos?'+':'−') + fmt(Math.abs(gain)) + '  (' + (pos?'+':'') + pct.toFixed(2) + '%)';
+  ge.style.color = pos ? '#22c55e' : '#ef4444';
+  tt.style.left  = (e.clientX + 14) + 'px';
+  tt.style.top   = (e.clientY - 80) + 'px';
+  tt.classList.add('show');
+}
+
+function hideTT() {
+  document.getElementById('chartTooltip').classList.remove('show');
+}
+
+function initChart() {
+  document.getElementById('chartYearLabel').textContent = chartYear;
+  buildMonthInputs();
+  drawChart();
+}
+
+window.addEventListener('resize', drawChart);
+
+// =================== BOOT ===================
+(async () => {
+  if (await checkSession()) {
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('mainApp').style.display = 'block';
+    try { await loadAll(); } catch (e) { console.warn(e); }
+    render(); renderInv(); initChart();
+  } else {
+    document.getElementById('loginScreen').style.display = 'flex';
+    document.getElementById('mainApp').style.display = 'none';
+  }
+})();
+</script>;font-size:.9rem;font-weight:600;cursor:pointer;transition:opacity .15s,transform .12s;margin-top:4px;letter-spacing:.2px}
     .btn:hover{opacity:.88;transform:translateY(-1px)}.btn:active{transform:translateY(0)}
     .btn-g{background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff}
     .btn-r{background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff}
@@ -447,568 +1140,6 @@
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
-<script>
-// =================== GLOBALS ===================
-const MONTHS = ['Jan','Feb','Mar','Apr','Maj','Jun','Jul','Aug','Sep','Okt','Nov','Dec'];
-let chartYear = new Date().getFullYear();
-let chartData = JSON.parse(localStorage.getItem('chartData') || '{}');
-function saveChartData() { localStorage.setItem('chartData', JSON.stringify(chartData)); }
 
-const CC={
-  'Lön':'#6366f1','Frilans':'#8b5cf6','Investering':'#06b6d4',
-  'Bidrag / Ersättning':'#f59e0b','Ränta / Utdelning':'#10b981',
-  'Boende':'#ef4444','Mat & Dryck':'#f97316','Transport':'#eab308',
-  'Nöje & Fritid':'#ec4899','Hälsa & Vård':'#22c55e','Kläder':'#a78bfa',
-  'Teknik & Prenumerationer':'#38bdf8','Sparande':'#14b8a6','Övrigt':'#94a3b8'
-};
-const SCOLORS = {
-  'Teknik':'#6366f1','Finans':'#06b6d4','Hälsa':'#22c55e','Industri':'#f97316',
-  'Konsument':'#ec4899','Energi':'#eab308','Fastigheter':'#ef4444',
-  'Fond / ETF':'#8b5cf6','Krypto':'#f59e0b','Övrigt':'#94a3b8'
-};
-
-let data    = JSON.parse(localStorage.getItem('budgetv3') || '[]');
-let invData = JSON.parse(localStorage.getItem('investv1') || '[]');
-const now   = () => new Date().toISOString().slice(0, 10);
-const fmt   = n => (n||0).toLocaleString('sv-SE', {minimumFractionDigits:0}) + ' kr';
-const esc   = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-const fmtD  = d => { if(!d) return '–'; const [y,m,day]=d.split('-'); return `${day}/${m}/${y}`; };
-const save  = () => localStorage.setItem('budgetv3', JSON.stringify(data));
-const saveInv = () => localStorage.setItem('investv1', JSON.stringify(invData));
-const fmtNum  = n => (n||0).toLocaleString('sv-SE', {minimumFractionDigits:0, maximumFractionDigits:4});
-
-// =================== TOAST ===================
-function showToast(msg, type='green') {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.className = `toast ${type} show`;
-  setTimeout(() => t.className = `toast ${type}`, 2800);
-}
-
-// =================== LOGIN ===================
-const CREDENTIALS = { username: 'massemus', password: 'massemus' };
-
-function checkSession() {
-  return sessionStorage.getItem('budget_auth') === 'true';
-}
-
-function doLogin() {
-  const user = document.getElementById('loginUser').value.trim();
-  const pass = document.getElementById('loginPass').value;
-  const err  = document.getElementById('loginErr');
-  if (user === CREDENTIALS.username && pass === CREDENTIALS.password) {
-    sessionStorage.setItem('budget_auth', 'true');
-    document.getElementById('loginScreen').style.display = 'none';
-    document.getElementById('mainApp').style.display = 'block';
-    err.style.display = 'none';
-    render(); renderInv(); initChart();
-  } else {
-    err.style.display = 'block';
-    document.getElementById('loginPass').value = '';
-  }
-}
-
-function doLogout() {
-  sessionStorage.removeItem('budget_auth');
-  document.getElementById('loginScreen').style.display = 'flex';
-  document.getElementById('mainApp').style.display = 'none';
-  document.getElementById('loginUser').value = '';
-  document.getElementById('loginPass').value = '';
-}
-
-// =================== TAB SWITCHING ===================
-function switchTab(name, btn) {
-  document.querySelectorAll('.tab-section').forEach(s => s.classList.remove('active'));
-  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-'+name).classList.add('active');
-  btn.classList.add('active');
-  const badge = document.getElementById('investBadge');
-  if (name === 'invest') {
-    badge.style.display = 'flex';
-    setTimeout(drawChart, 50);
-  } else {
-    badge.style.display = 'none';
-  }
-}
-
-// =================== BUDGET ===================
-document.getElementById('iDate').value = now();
-document.getElementById('eDate').value = now();
-
-function add(type) {
-  const p = type === 'income' ? 'i' : 'e';
-  const descEl = document.getElementById(p+'Desc');
-  const amtEl  = document.getElementById(p+'Amt');
-  const dateEl = document.getElementById(p+'Date');
-  const desc   = descEl.value.trim();
-  const amt    = parseFloat(amtEl.value);
-  const cat    = document.getElementById(p+'Cat').value;
-  const date   = dateEl.value;
-  let ok = true;
-  if (!desc)          { descEl.classList.add('error'); setTimeout(()=>descEl.classList.remove('error'),400); ok=false; }
-  if (!amt || amt<=0) { amtEl.classList.add('error');  setTimeout(()=>amtEl.classList.remove('error'),400);  ok=false; }
-  if (!date)          { dateEl.classList.add('error'); setTimeout(()=>dateEl.classList.remove('error'),400); ok=false; }
-  if (!ok) return;
-  data.unshift({ id: Date.now(), type, desc, amt, cat, date });
-  save(); render();
-  descEl.value = ''; amtEl.value = '';
-  dateEl.value = now();
-  showToast(type==='income' ? '✓ Inkomst tillagd' : '✓ Utgift tillagd', type==='income'?'green':'red');
-}
-
-function del(id) {
-  data = data.filter(t => t.id !== id);
-  save(); render();
-  showToast('Transaktion borttagen', 'red');
-}
-
-function clearFilter() {
-  document.getElementById('mFilter').value = '';
-  render();
-}
-
-function render() {
-  const m   = document.getElementById('mFilter').value;
-  const vis = m ? data.filter(t => t.date.startsWith(m)) : data;
-  const inc = vis.filter(t => t.type === 'income');
-  const exp = vis.filter(t => t.type === 'expense');
-  const tI  = inc.reduce((s,t) => s+t.amt, 0);
-  const tE  = exp.reduce((s,t) => s+t.amt, 0);
-  const b   = tI - tE;
-  const p   = tI > 0 ? Math.min(tE/tI*100, 100) : (tE > 0 ? 100 : 0);
-
-  document.getElementById('totIn').textContent = fmt(tI);
-  document.getElementById('totEx').textContent = fmt(tE);
-  document.getElementById('cntIn').textContent = inc.length + (inc.length===1?' post':' poster');
-  document.getElementById('cntEx').textContent = exp.length + (exp.length===1?' post':' poster');
-
-  const bEl = document.getElementById('bal');
-  bEl.textContent = (b < 0 ? '−' : '') + fmt(Math.abs(b));
-  bEl.className = 'card-value' + (b < 0 ? ' neg' : '');
-  document.getElementById('balNote').textContent = b >= 0 ? '✓ Positivt saldo' : '⚠ Underskott';
-
-  const bar = document.getElementById('bar');
-  bar.style.width = p + '%';
-  bar.className = 'prog-fill' + (p > 85 ? ' danger' : p > 65 ? ' warn' : '');
-  document.getElementById('pct').textContent = Math.round(p) + '%';
-
-  const tb = document.getElementById('tBody');
-  const em = document.getElementById('emptyMsg');
-  if (!vis.length) {
-    tb.innerHTML = ''; em.style.display = 'block';
-  } else {
-    em.style.display = 'none';
-    tb.innerHTML = [...vis]
-      .sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id)
-      .map(t => `<tr>
-        <td>${esc(t.desc)}</td>
-        <td><span class="badge badge-${t.type}">${esc(t.cat)}</span></td>
-        <td style="white-space:nowrap">${fmtD(t.date)}</td>
-        <td style="color:var(--dim);font-size:.8rem">${t.type==='income'?'Inkomst':'Utgift'}</td>
-        <td class="amt-${t.type[0]}" style="text-align:right;white-space:nowrap">${t.type==='income'?'+':'−'}${fmt(t.amt)}</td>
-        <td><button class="del" onclick="del(${t.id})" title="Ta bort">✕</button></td>
-      </tr>`).join('');
-  }
-
-  const cm = {};
-  exp.forEach(t => { cm[t.cat] = (cm[t.cat]||0) + t.amt; });
-  const cats = Object.entries(cm).sort((a,b) => b[1]-a[1]);
-  const mx = cats[0]?.[1] || 1;
-  document.getElementById('catArea').innerHTML = cats.length
-    ? cats.map(([c,a]) => `<div class="cat-row">
-        <div class="cat-name" title="${esc(c)}">${esc(c)}</div>
-        <div class="cat-bg"><div class="cat-fill" style="width:${(a/mx*100).toFixed(1)}%;background:${CC[c]||'#94a3b8'}"></div></div>
-        <div class="cat-amt" style="color:${CC[c]||'#94a3b8'}">${fmt(a)}</div>
-      </div>`).join('')
-    : '<p style="color:var(--dim);font-size:.82rem">Inga utgifter att visa för vald period.</p>';
-}
-
-// =================== INVESTMENTS ===================
-document.getElementById('invDate').value = now();
-
-function getHoldings() {
-  const map = {};
-  invData.forEach(p => {
-    const key = p.name.toLowerCase();
-    if (!map[key]) map[key] = { name:p.name, cost:0, val:0 };    map[key].cost   += p.cost;
-    map[key].val    += p.val;
-  });
-  return Object.values(map);
-}
-
-function addInv() {
-  const nameEl   = document.getElementById('invName');  const costEl   = document.getElementById('invCost');
-  const valEl    = document.getElementById('invVal');
-  const dateEl   = document.getElementById('invDate');
-  const name     = nameEl.value.trim();  const cost     = parseFloat(costEl.value);
-  const val      = parseFloat(valEl.value);
-  const date     = dateEl.value;
-  let ok = true;
-  if (!name)               { nameEl.classList.add('error');  setTimeout(()=>nameEl.classList.remove('error'),400);  ok=false; }
-  if (isNaN(cost)||cost<0) { costEl.classList.add('error');  setTimeout(()=>costEl.classList.remove('error'),400);  ok=false; }
-  if (isNaN(val)||val<0)   { valEl.classList.add('error');   setTimeout(()=>valEl.classList.remove('error'),400);   ok=false; }
-  if (!date)               { dateEl.classList.add('error');  setTimeout(()=>dateEl.classList.remove('error'),400);  ok=false; }
-  if (!ok) return;
-  invData.push({ id:Date.now(), name, cost, val, date });
-
-  // Tolka inmatat "Dagens värde" som TOTALT värde för innehavet (inte per köp).
-  // Om det finns flera köp på samma namn fördelas totalvärdet proportionellt efter investerat belopp.
-  const nameLower = String(name).toLowerCase();
-  const purchases = invData.filter(p => String(p.name).toLowerCase() === nameLower);
-  if (purchases.length > 1) {
-    const totalCost = purchases.reduce((sum, p) => sum + (p.cost || 0), 0);
-    purchases.forEach(p => {
-      if (totalCost > 0) p.val = (p.cost / totalCost) * val;
-      else p.val = val / purchases.length;
-    });
-  }
-
-  showToast('✓ Köp registrerat', 'green');
-  saveInv(); renderInv();
-
-  nameEl.value='';
-  costEl.value='';
-  valEl.value='';
-  dateEl.value = now();
-}
-
-function delInv(id) {
-  invData = invData.filter(i => i.id !== id);
-  saveInv(); renderInv();
-  showToast('Investering borttagen', 'red');
-}
-
-function delHolding(name) {
-  const nameLower = name.toLowerCase();
-  invData = invData.filter(i => i.name.toLowerCase() !== nameLower);
-  saveInv(); renderInv();
-  showToast('Alla köp av ' + name + ' borttagna', 'red');
-}
-
-function delHoldingBtn(btn) {
-  delHolding(btn.dataset.name);
-}
-
-function toggleEdit(name) {
-  const raw = prompt('Ange nytt dagsvärde (kr) för ' + name + ':');
-  if (raw === null) return;
-  const val = parseFloat(String(raw).replace(',', '.'));
-  if (isNaN(val) || val < 0) { showToast('Ogiltigt värde', 'red'); return; }
-
-  const nameLower = String(name).toLowerCase();
-  const purchases = invData.filter(p => String(p.name).toLowerCase() === nameLower);
-  if (!purchases.length) return;
-
-  const totalCost = purchases.reduce((sum, p) => sum + (p.cost || 0), 0);
-  purchases.forEach(p => {
-    if (totalCost > 0) p.val = (p.cost / totalCost) * val;
-    else p.val = val / purchases.length;
-  });
-
-  saveInv(); renderInv();
-  showToast(name + ' uppdaterat', 'green');
-}
-
-
-function drawChart() {
-  const svg = document.getElementById('chartSvg');
-  if (!svg) return;
-  const W = Math.max(svg.getBoundingClientRect().width || 700, 480);
-  const H = 260;
-  const PAD = { top: 24, right: 20, bottom: 42, left: 72 };
-  const cW = W - PAD.left - PAD.right;
-  const cH = H - PAD.top - PAD.bottom;
-  const months  = getMonthData(chartYear);
-  const holdings = getHoldings();
-  const totVal  = holdings.reduce((s,h) => s + h.val, 0);   // live portfolio value
-
-  const totalCost = invData.reduce((s,i) => s + i.cost, 0);  // total invested
-
-  const pts = months.map((m, idx) => {
-    const ym    = `${chartYear}-${String(idx+1).padStart(2,'0')}`;
-    const nowYM = new Date().toISOString().slice(0,7);
-
-    // Green line = portfolio market value (manual > live totVal for current month)
-    let val = null;
-    if (m.val !== '') {
-      val = parseFloat(m.val);
-    } else if (ym === nowYM && totVal > 0) {
-      val = totVal;
-    }
-
-    // Blue dashed line = cumulative invested amount up to this month
-    const cumInvested = invData
-      .filter(p => p.date && p.date.slice(0,7) <= ym)
-      .reduce((s,p) => s + p.cost, 0) || totalCost;
-
-    return { i: idx, val, cost: cumInvested, invested: totalCost };
-  });
-
-  const GOAL    = 1000000;
-  const valPts  = pts.filter(p => p.val !== null);
-  const maxCost = Math.max(...pts.map(p => p.cost), 0);
-  const allNums = [0, maxCost, GOAL, ...valPts.map(p => p.val)];
-  const maxV = Math.max(...allNums) * 1.08 || 1000;
-  const minV = Math.min(0, ...allNums);
-  const range = maxV - minV || 1;
-  const xP = i => PAD.left + (i / 11) * cW;
-  const yP = v => PAD.top + cH - ((v - minV) / range) * cH;
-
-  let g = '';
-  [0, 0.25, 0.5, 0.75, 1].forEach(t => {
-    const v   = minV + range * t;
-    const y   = yP(v);
-    const lbl = v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? Math.round(v/1e3)+'k' : Math.round(v)+'';
-    g += `<line x1="${PAD.left}" y1="${y}" x2="${W-PAD.right}" y2="${y}" stroke="#2e3347" stroke-width="1" stroke-dasharray="4,3"/>`;
-    g += `<text x="${PAD.left-8}" y="${y+4}" text-anchor="end" fill="#64748b" font-size="11" font-family="Inter,Arial">${lbl}</text>`;
-  });
-
-  // Cost line: step through each month's cumulative invested amount
-  const costLinePts = pts.map(p => `${xP(p.i)},${yP(p.cost)}`).join(' L ');
-  const costLine = `<path d="M ${costLinePts}" stroke="#6366f1" stroke-width="2" stroke-dasharray="7,4" fill="none" opacity="0.8"/>`;
-
-  // Goal line at 1 000 000 kr
-  const goalY    = yP(GOAL);
-  const goalPct  = totVal > 0 ? Math.min(totVal / GOAL * 100, 100) : 0;
-  const goalDone = totVal >= GOAL;
-  const goalCol  = goalDone ? '#22c55e' : '#f59e0b';
-  const goalLine = `
-    <line x1="${PAD.left}" y1="${goalY}" x2="${W - PAD.right}" y2="${goalY}"
-      stroke="${goalCol}" stroke-width="1.5" stroke-dasharray="10,5" opacity="0.9"/>
-    <rect x="${W - PAD.right - 98}" y="${goalY - 11}" width="96" height="20" rx="6"
-      fill="${goalCol}" opacity="0.15"/>
-    <text x="${W - PAD.right - 50}" y="${goalY + 5}" text-anchor="middle"
-      fill="${goalCol}" font-size="11" font-weight="600" font-family="Inter,Arial">
-      🎯 ${goalDone ? '✓ Mål nått!' : goalPct.toFixed(1) + '% av 1M'}
-    </text>`;
-
-  let area = '', line = '';
-  if (valPts.length >= 2) {
-    const coords = valPts.map(p => `${xP(p.i)},${yP(p.val)}`).join(' L ');
-    area = `<path d="M ${xP(valPts[0].i)},${yP(minV)} L ${coords} L ${xP(valPts[valPts.length-1].i)},${yP(minV)} Z" fill="url(#vg)"/>`;
-    line = `<path d="M ${coords}" stroke="#22c55e" stroke-width="2.5" fill="none" stroke-linejoin="round" stroke-linecap="round"/>`;
-  } else if (valPts.length === 1) {
-    line = `<circle cx="${xP(valPts[0].i)}" cy="${yP(valPts[0].val)}" r="4" fill="#22c55e"/>`;
-  }
-
-  // Vertical glow bars instead of dots — one per data point
-  const barW = Math.max(cW / 14, 8);
-  const dots = valPts.map(p => {
-    const pos = (p.val - p.invested) >= 0;
-    const col = pos ? '#22c55e' : '#ef4444';
-    const barTop = yP(p.val);
-    const barH   = Math.max((PAD.top + cH) - barTop, 2);
-    const gradId = `bg${p.i}`;
-    return `
-      <defs>
-        <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="${col}" stop-opacity="0.55"/>
-          <stop offset="100%" stop-color="${col}" stop-opacity="0.03"/>
-        </linearGradient>
-      </defs>
-      <rect x="${xP(p.i) - barW/2}" y="${barTop}" width="${barW}" height="${barH}"
-        rx="4" fill="url(#${gradId})"
-        style="cursor:pointer;transition:opacity .15s"
-        onmouseenter="this.style.opacity='.75';showTT(event,${p.i},${p.val},${p.invested})"
-        onmouseleave="this.style.opacity='1';hideTT()"/>
-      <circle cx="${xP(p.i)}" cy="${barTop}" r="3.5"
-        fill="${col}" stroke="#1a1d27" stroke-width="2" pointer-events="none"/>`;
-  }).join('');
-
-  const hits = pts.map(p => p.val !== null ? '' : '').join('');
-
-  const xlbls = MONTHS.map((m,i) =>
-    `<text x="${xP(i)}" y="${H-6}" text-anchor="middle" fill="#64748b" font-size="11" font-family="Inter,Arial">${m}</text>`
-  ).join('');
-
-  const empty = valPts.length === 0
-    ? `<text x="${W/2}" y="${H/2}" text-anchor="middle" fill="#475569" font-size="13" font-family="Inter,Arial">Ange värden nedan eller lägg till köp med datum</text>`
-    : '';
-
-  svg.setAttribute('height', H);
-  svg.innerHTML = `
-    <defs>
-      <linearGradient id="vg" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#22c55e" stop-opacity="0.12"/>
-        <stop offset="100%" stop-color="#22c55e" stop-opacity="0.01"/>
-      </linearGradient>
-    </defs>
-    ${g}${goalLine}${costLine}${area}${line}${dots}${xlbls}${empty}`;
-}
-function renderInv() {
-  const holdings = getHoldings();
-  const totCost  = holdings.reduce((s,h) => s+h.cost, 0);
-  const totVal   = holdings.reduce((s,h) => s+h.val,  0);
-  const gainKr   = totVal - totCost;
-  const gainPct  = totCost > 0 ? (gainKr/totCost*100) : 0;
-  const isPos    = gainKr >= 0;
-
-  document.getElementById('invTotVal').textContent  = fmt(totVal);
-  document.getElementById('invValNote').textContent = totCost > 0 ? (isPos ? '↑ Värdeökning' : '↓ Värdeminskning') : '–';
-  document.getElementById('investBadgeValue').textContent = fmt(totCost);
-
-  const gkEl = document.getElementById('invTotGainKr');
-  const gpEl = document.getElementById('invTotGainPct');
-  gkEl.textContent = (isPos?'+':'−') + fmt(Math.abs(gainKr));
-  gpEl.textContent = (isPos?'+':'') + gainPct.toFixed(2) + '%';
-  gkEl.className   = 'card-value ' + (isPos?'pos':'neg2');
-  gpEl.className   = 'card-value ' + (isPos?'pos':'neg2');
-  document.getElementById('invGainCard').querySelector('.card-label').style.color = isPos?'var(--green)':'var(--red)';
-  document.getElementById('invPctCard').querySelector('.card-label').style.color  = isPos?'var(--green)':'var(--red)';
-
-  const tbody = document.getElementById('invBody');
-  const empty = document.getElementById('invEmpty');
-  if (!invData.length) { tbody.innerHTML=''; empty.style.display='block'; drawChart(); return; }
-  empty.style.display = 'none';
-
-  const sorted = holdings.sort((a,b) => {
-    const gainA = a.val - a.cost;
-    const gainB = b.val - b.cost;
-    return gainB - gainA;
-  });
-  tbody.innerHTML = sorted.map(h => {
-    const gKr  = h.val - h.cost;
-    const gPct = h.cost > 0 ? (gKr/h.cost*100) : 0;
-    const pos  = gKr >= 0; const zero = gKr === 0;
-    const pctCls = zero?'zero':pos?'pos':'neg';
-    const amtCls = zero?'neutral':pos?'pos':'neg2';
-    const arrow  = zero?'→':pos?'▲':'▼';
-    // Find earliest purchase date for this holding
-    const purchases = invData.filter(p => p.name.toLowerCase() === h.name.toLowerCase());
-    const earliestDate = purchases.reduce((min, p) => !min || p.date < min ? p.date : min, '');
-    return `<tr>
-      <td class="name">${esc(h.name)}</td>
-      <td class="num" style="color:var(--muted)">${fmt(h.cost)}</td>
-<td class="num ${amtCls}">${arrow} ${fmt(Math.abs(gKr))} <span style="opacity:0.7;font-size:0.9em">(${pos?'+':''}${gPct.toFixed(1)}%)</span></td>
-      <td>
-        <button class="del" onclick="toggleEdit('${esc(h.name)}')" title="Redigera värde" style="color:var(--blue);margin-right:4px">✎</button>
-        <button class="del" data-name="${esc(h.name)}" onclick="delHoldingBtn(this)" title="Ta bort alla köp">✕</button>
-      </td>
-    </tr>`;
-  }).join('');
-  drawChart();
-}
-
-// =================== CHART ===================
-function getAutoVal(year, monthIdx) {
-  const ym = `${year}-${String(monthIdx+1).padStart(2,'0')}`;
-  const purchases = invData.filter(p => p.date && p.date.slice(0,7) <= ym);
-  if (!purchases.length) return null;
-  return purchases.reduce((s,p) => s + p.cost, 0);
-}
-
-function getMonthData(year) {
-  const yk = String(year);
-  if (!chartData[yk]) chartData[yk] = Array(12).fill(null).map(() => ({ val: '' }));
-  return chartData[yk];
-}
-
-function changeChartYear(delta) {
-  chartYear += delta;
-  document.getElementById('chartYearLabel').textContent = chartYear;
-  buildMonthInputs();
-  drawChart();
-}
-
-function buildMonthInputs() {
-  const grid = document.getElementById('monthInputGrid');
-  if (!grid) return;
-  const months  = getMonthData(chartYear);
-  const holdings = getHoldings();
-  const totVal  = holdings.reduce((s,h) => s + h.val, 0);
-  const nowYM   = new Date().toISOString().slice(0,7);
-
-  grid.innerHTML = MONTHS.map((m, i) => {
-    const ym        = `${chartYear}-${String(i+1).padStart(2,'0')}`;
-    const autoV     = getAutoVal(chartYear, i);
-    const isNowMon  = ym === nowYM;
-    const hasManual = months[i].val !== '';
-    // Current month: auto-fill with live totVal unless user has overridden
-    const isLive    = isNowMon && totVal > 0 && !hasManual;
-    const rawVal    = hasManual ? months[i].val : (isLive ? Math.round(totVal) : '');
-    const displayVal = rawVal ? Math.round(rawVal).toLocaleString('sv-SE') : '';
-
-    // Hide future months
-    const isFuture = ym > nowYM;
-    if (isFuture) return '';
-
-    let ph, badge;
-    if (hasManual) {
-      badge = '';
-      ph = '';
-    } else if (isLive) {
-      badge = '<span style="color:#22c55e;font-size:.65rem">LIVE</span>';
-      ph = '';
-    } else if (autoV !== null) {
-      badge = '<span style="color:#6366f1;font-size:.65rem">AUTO</span>';
-      ph = `Köpt: ${Math.round(autoV).toLocaleString('sv-SE')} kr`;
-    } else {
-      badge = '';
-      ph = '0 kr';
-    }
-
-    const borderStyle = isLive
-      ? 'border-color:#22c55e80'
-      : (!hasManual && autoV !== null ? 'border-color:#6366f150' : '');
-
-    return `<div class="month-cell" style="${borderStyle}">
-      <div class="month-cell-label" style="display:flex;justify-content:space-between">
-        <span>${m}</span>${badge}
-      </div>
-      <input type="text" inputmode="numeric" pattern="[0-9 ]*"
-        value="${displayVal}"
-        placeholder="${ph}"
-        oninput="updateMonthVal(${i}, this.value.replace(/\\s/g,''))"
-        onfocus="this.select()"/>
-    </div>`;
-  }).join('');
-}
-
-function updateMonthVal(idx, value) {
-  const yk = String(chartYear);
-  if (!chartData[yk]) chartData[yk] = Array(12).fill(null).map(() => ({ val: '' }));
-  chartData[yk][idx].val = value === '' ? '' : parseFloat(value) || 0;
-  saveChartData();
-  buildMonthInputs();
-  drawChart();
-}
-
-
-function showTT(e, i, val, cost) {
-  const tt   = document.getElementById('chartTooltip');
-  const gain = val - cost;
-  const pct  = cost > 0 ? (gain/cost*100) : 0;
-  const pos  = gain >= 0;
-  document.getElementById('ttMonth').textContent = MONTHS[i] + ' ' + chartYear;
-  document.getElementById('ttCost').textContent  = fmt(cost);
-  document.getElementById('ttVal').textContent   = fmt(val);
-  const ge = document.getElementById('ttGain');
-  ge.textContent = (pos?'+':'−') + fmt(Math.abs(gain)) + '  (' + (pos?'+':'') + pct.toFixed(2) + '%)';
-  ge.style.color = pos ? '#22c55e' : '#ef4444';
-  tt.style.left  = (e.clientX + 14) + 'px';
-  tt.style.top   = (e.clientY - 80) + 'px';
-  tt.classList.add('show');
-}
-
-function hideTT() {
-  document.getElementById('chartTooltip').classList.remove('show');
-}
-
-function initChart() {
-  document.getElementById('chartYearLabel').textContent = chartYear;
-  buildMonthInputs();
-  drawChart();
-}
-
-window.addEventListener('resize', drawChart);
-
-// =================== BOOT ===================
-if (checkSession()) {
-  document.getElementById('loginScreen').style.display = 'none';
-  document.getElementById('mainApp').style.display = 'block';
-  render(); renderInv(); initChart();
-}
-
-</script>
 </body>
 </html>
