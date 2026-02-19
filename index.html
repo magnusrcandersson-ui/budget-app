@@ -750,6 +750,16 @@ window.addEventListener('resize', drawChart);
     document.getElementById('mainApp').style.display = 'none';
   }
 })();
+
+// Expose functions for inline onclick handlers
+window.doLogin = doLogin;
+window.doLogout = doLogout;
+window.add = add;
+window.del = del;
+window.addInv = addInv;
+window.delInv = delInv;
+window.saveMonthVal = saveMonthVal;
+
 </script>;font-size:.9rem;font-weight:600;cursor:pointer;transition:opacity .15s,transform .12s;margin-top:4px;letter-spacing:.2px}
     .btn:hover{opacity:.88;transform:translateY(-1px)}.btn:active{transform:translateY(0)}
     .btn-g{background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff}
