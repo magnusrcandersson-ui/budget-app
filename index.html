@@ -1,0 +1,99 @@
+
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Budget & Portfölj – Supabase test</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; padding: 24px; }
+    #loginScreen, #mainApp { max-width: 420px; margin: 0 auto; }
+    input { width: 100%; padding: 10px; margin: 6px 0 10px; }
+    button { padding: 10px 14px; cursor: pointer; }
+    #loginErr { color: #b00020; margin-top: 8px; display:none; }
+    .muted { opacity: .7; font-size: 13px; }
+    code { background: #f2f2f2; padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <h2>Budget & Portfölj</h2>
+  <div class="muted">Supabase Auth test. (Öppna DevTools Console och testa <code>typeof window.doLogin</code> och <code>typeof window.supabase</code>)</div>
+  <label>ANVÄNDARNAMN</label>
+  <input id="loginUser" placeholder="massemus" />
+  <label>LÖSENORD</label>
+  <input id="loginPass" type="password" placeholder="lösenord" />
+  <button onclick="doLogin()">Logga in</button>
+  <div id="loginErr"></div>
+</div>
+
+<div id="mainApp" style="display:none;">
+  <h2>Inloggad ✅</h2>
+  <p class="muted">Om du ser detta fungerar Supabase Auth.</p>
+  <button onclick="doLogout()">Logga ut</button>
+</div>
+
+<script type="module">
+  import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+  const SUPABASE_URL = "https://ivkpxyylajewbvewbu.supabase.co";
+  const SUPABASE_ANON_KEY = "sb_publishable_15LBNxbc-LWTHqLG3QTZhQ_nWmBG3HK";
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  // Expose supabase for console debugging (so you won't see "undefined")
+  window.supabase = supabase;
+
+  const LOGIN_EMAIL = "magnusrcandersson@icloud.com";
+  const DISPLAY_USERNAME = "massemus";
+
+  async function doLogin() {
+    const username = document.getElementById("loginUser").value.trim();
+    const password = document.getElementById("loginPass").value;
+    const err = document.getElementById("loginErr");
+
+    err.style.display = "none";
+    err.textContent = "";
+
+    if (username.toLowerCase() !== DISPLAY_USERNAME.toLowerCase()) {
+      err.textContent = "Fel användarnamn";
+      err.style.display = "block";
+      return;
+    }
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: LOGIN_EMAIL,
+      password
+    });
+
+    if (error) {
+      err.textContent = error.message;
+      err.style.display = "block";
+      return;
+    }
+
+    document.getElementById("loginScreen").style.display = "none";
+    document.getElementById("mainApp").style.display = "block";
+  }
+
+  async function doLogout() {
+    await supabase.auth.signOut();
+    document.getElementById("loginScreen").style.display = "block";
+    document.getElementById("mainApp").style.display = "none";
+  }
+
+  // Expose functions for inline onclick handlers
+  window.doLogin = doLogin;
+  window.doLogout = doLogout;
+
+  // Auto-check session on load
+  const { data } = await supabase.auth.getSession();
+  if (data.session) {
+    document.getElementById("loginScreen").style.display = "none";
+    document.getElementById("mainApp").style.display = "block";
+  }
+</script>
+
+</body>
+</html>
